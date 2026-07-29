@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-SOURCE = Path(__file__).parents[1] / "wx_gui.py"
+SOURCE = Path(__file__).parents[1] / "source" / "wx_gui.py"
 
 
 def test_gui_uses_safe_trash_helper_and_macos_folder_opening():

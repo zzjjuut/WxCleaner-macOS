@@ -1,3 +1,9 @@
+import sys
+from pathlib import Path
+
+
+sys.path.insert(0, str(Path(__file__).parents[1] / "source"))
+
 from file_actions import move_to_trash
 
 

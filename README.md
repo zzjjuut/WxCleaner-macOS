@@ -30,6 +30,18 @@ WxCleaner 是一款专为清理微信接收文件而设计的轻量级桌面工�
     *   `send2trash`: 实现跨平台的安全删除（移至回收站）。
     *   `Pillow`: 图像处理支持。
 
+## 📁 目录结构
+
+```text
+app/                 最终可运行的 WxCleaner.app
+source/              Python 源码
+tests/               自动化测试
+assets/              应用图标和打包资源
+packaging/           PyInstaller 配置
+build/               构建中间产物和历史副本
+environment/.venv/   已安装依赖的 Python 虚拟环境
+```
+
 ## 🚀 快速开始
 
 ### macOS Apple Silicon
@@ -52,11 +64,11 @@ WxCleaner 是一款专为清理微信接收文件而设计的轻量级桌面工�
     ```
 3.  **安装依赖**:
     ```bash
-    pip install -r requirements.txt
+    environment/.venv/bin/pip install -r requirements.txt
     ```
 4.  **运行程序**:
     ```bash
-    python main.py
+    environment/.venv/bin/python source/main.py
     ```
 
 ## 📖 使用指南
@@ -74,13 +86,20 @@ WxCleaner 是一款专为清理微信接收文件而设计的轻量级桌面工�
 如果您想自行打包 macOS 应用：
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt pyinstaller
-pyinstaller --noconfirm --clean --windowed --name WxCleaner --icon WxCleaner.icns main.py
+environment/.venv/bin/pip install -r requirements.txt pyinstaller
+environment/.venv/bin/pyinstaller --noconfirm --clean --windowed --name WxCleaner \
+    --distpath build/pyinstaller/dist --workpath build/pyinstaller/work \
+    --icon assets/WxCleaner.icns packaging/WxCleaner.spec
 ```
 
-打包完成后，应用将位于 `dist/WxCleaner.app`。当前发布包针对 Apple Silicon (`arm64`) 构建。
+打包完成后，应用将位于 `build/pyinstaller/dist/WxCleaner.app`；交付用应用位于
+`app/WxCleaner.app`。当前发布包针对 Apple Silicon (`arm64`) 构建。
+
+运行测试：
+
+```bash
+environment/.venv/bin/python -m pytest tests -v
+```
 
 ## ⚠️ 免责声明
 

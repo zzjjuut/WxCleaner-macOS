@@ -6,7 +6,9 @@ __pycache__/
 # Distribution / packaging
 build/
 dist/
+app/
 *.spec
+!packaging/WxCleaner.spec
 
 # Installer logs
 pip-log.txt
