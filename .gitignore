@@ -45,6 +45,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+environment/
 env/
 venv/
 ENV/
@@ -79,6 +80,7 @@ dmypy.json
 .gemini/
 tmp/
 *.log
+.DS_Store
 
 # Dev tools
 check_font.py

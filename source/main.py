@@ -1,9 +1,8 @@
 from wx_gui import WxCleanerApp
-import ttkbootstrap as ttk
+import customtkinter as ctk
 
 if __name__ == "__main__":
-    # themename 可选: cosmo, flatly, journal, literal, lumen, minty, pulse, sandstone, united, yeti
-    # 深色主题: cyborg, darkly, solar, superhero
-    root = ttk.Window(themename="cosmo") 
+    ctk.set_appearance_mode("light")
+    root = ctk.CTk()
     app = WxCleanerApp(root)
     root.mainloop()

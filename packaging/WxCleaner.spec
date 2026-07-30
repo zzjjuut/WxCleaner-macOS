@@ -6,7 +6,7 @@ a = Analysis(
     pathex=['../source'],
     binaries=[],
     datas=[('../assets/icon.ico', '.')],
-    hiddenimports=[],
+    hiddenimports=['customtkinter', 'customtkinter.windows', 'customtkinter.windows.widgets', 'send2trash'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -47,5 +47,6 @@ app = BUNDLE(
     coll,
     name='WxCleaner.app',
     icon='../assets/WxCleaner.icns',
+    version='1.5.0',
     bundle_identifier=None,
 )
