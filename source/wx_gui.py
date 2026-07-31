@@ -66,6 +66,20 @@ class S:
     BTN_H     = 36
 
 
+def _decode_touchpad_delta(raw_delta):
+    """Decode Tk 9's packed signed horizontal and vertical touchpad deltas."""
+    raw = int(raw_delta) & 0xFFFFFFFF
+    delta_y = raw & 0xFFFF
+    delta_x = (raw >> 16) & 0xFFFF
+
+    if delta_y >= 0x8000:
+        delta_y -= 0x10000
+    if delta_x >= 0x8000:
+        delta_x -= 0x10000
+
+    return delta_x, delta_y
+
+
 # ════════════════════════════════════════════════════════════
 #  Custom Table (Canvas + Frame, replaces ttk.Treeview)
 # ════════════════════════════════════════════════════════════
@@ -85,6 +99,13 @@ class FileTable(ctk.CTkFrame):
 
         self.col_keys = list(columns)
         self.col_widths = widths
+        self._column_specs = [
+            (
+                180 if width == 0 and col == "path" else max(0, int(width)),
+                1 if width == 0 else 0,
+            )
+            for col, width in zip(self.col_keys, self.col_widths)
+        ]
         self.rows = []          # [(frame, {col: label}, values_list, tags_tuple)]
         self.selected = set()   # row indices
         self._last_idx = None
@@ -93,22 +114,34 @@ class FileTable(ctk.CTkFrame):
         self._on_menu = kw.pop("on_menu", None)
         self._row_bindtag = f"FileTableRow{id(self)}"
 
-        # ── header ──
-        self._header = ctk.CTkFrame(self, fg_color=C.BG_SEC, corner_radius=8, height=36)
-        self._header.pack(fill="x", padx=4, pady=(4, 2))
-        self._header.pack_propagate(False)
+        # ── shared table viewport ──
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)
 
-        for col, w in zip(self.col_keys, self.col_widths):
+        self._header = ctk.CTkFrame(self, fg_color=C.BG_SEC, corner_radius=8, height=36)
+        self._header.grid(row=0, column=0, sticky="ew", padx=(4, 0), pady=(4, 2))
+        self._header.grid_propagate(False)
+        self._configure_columns(self._header)
+        self._header_cells = {}
+
+        for index, col in enumerate(self.col_keys):
             anchor = "center" if col in ("num", "size", "mtime", "status") else "w"
-            ctk.CTkLabel(
+            label = ctk.CTkLabel(
                 self._header, text=self._col_label(col),
                 font=T.HEADING, text_color=C.TEXT2, anchor=anchor,
-            ).pack(side="left", padx=(8, 4), fill="x", expand=(col == "path"))
+            )
+            label.grid(row=0, column=index, sticky="ew", padx=(8, 4))
+            self._header_cells[col] = label
 
-        ctk.CTkFrame(self, height=1, fg_color=C.BORDER).pack(fill="x", padx=8)
+        self._separator = ctk.CTkFrame(self, height=1, fg_color=C.BORDER)
+        self._separator.grid(row=1, column=0, sticky="ew", padx=(4, 0))
 
         # ─ scrollable body ──
-        self._canvas = tk.Canvas(self, bg=C.BG, highlightthickness=0, bd=0)
+        scroll_increment = 8 if sys.platform == "darwin" else 0
+        self._canvas = tk.Canvas(
+            self, bg=C.BG, highlightthickness=0, bd=0,
+            yscrollincrement=scroll_increment,
+        )
         # Use native tk.Scrollbar — CTkScrollbar has compatibility issues with tk.Canvas
         self._scroll = tk.Scrollbar(
             self, orient="vertical", command=self._canvas.yview,
@@ -118,8 +151,8 @@ class FileTable(ctk.CTkFrame):
         )
         self._canvas.configure(yscrollcommand=self._scroll.set)
 
-        self._scroll.pack(side="right", fill="y", padx=(0, 2), pady=2)
-        self._canvas.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=2)
+        self._canvas.grid(row=2, column=0, sticky="nsew", padx=(4, 0), pady=2)
+        self._scroll.grid(row=2, column=1, sticky="ns", padx=(0, 2), pady=2)
 
         self._body = ctk.CTkFrame(self._canvas, fg_color=C.BG, corner_radius=0)
         self._win = self._canvas.create_window((0, 0), window=self._body, anchor="nw")
@@ -140,12 +173,16 @@ class FileTable(ctk.CTkFrame):
         self._body.bind("<MouseWheel>", self._scroll_wheel)
         self._body.bind("<Button-4>", self._scroll_wheel_linux)
         self._body.bind("<Button-5>", self._scroll_wheel_linux)
+        self._bind_optional_touchpad(self._canvas)
+        self._bind_optional_touchpad(self._body)
+        self._bind_optional_touchpad(getattr(self._body, "_canvas", None))
         self.bind_class(self._row_bindtag, "<Button-1>", self._on_body_click)
         self.bind_class(self._row_bindtag, "<Button-2>", self._on_body_menu)
         self.bind_class(self._row_bindtag, "<Button-3>", self._on_body_menu)
         self.bind_class(self._row_bindtag, "<MouseWheel>", self._scroll_wheel)
         self.bind_class(self._row_bindtag, "<Button-4>", self._scroll_wheel_linux)
         self.bind_class(self._row_bindtag, "<Button-5>", self._scroll_wheel_linux)
+        self._bind_optional_touchpad_class()
         self.bind_class(self._row_bindtag, "<Enter>", self._on_body_enter)
         self.bind_class(self._row_bindtag, "<Leave>", self._on_body_leave)
 
@@ -156,14 +193,15 @@ class FileTable(ctk.CTkFrame):
         row_fg = C.BG_ROW_ALT if idx % 2 else C.BG
         rf = ctk.CTkFrame(self._body, fg_color=row_fg, corner_radius=0, height=S.ROW_H)
         rf.pack(fill="x")
-        rf.pack_propagate(False)
+        rf.grid_propagate(False)
+        self._configure_columns(rf)
 
         # Store row index on the frame for event delegation
         rf.idx = idx
         self._attach_row_bindtag(rf)
 
         labels = {}
-        for col, w in zip(self.col_keys, self.col_widths):
+        for index, col in enumerate(self.col_keys):
             val = values.get(col, "")
             anchor = "center" if col in ("num", "size", "mtime", "status") else "w"
             color = self._tag_color(col, tags)
@@ -171,7 +209,7 @@ class FileTable(ctk.CTkFrame):
                 rf, text=str(val), font=T.BODY,
                 text_color=color, anchor=anchor,
             )
-            lbl.pack(side="left", padx=(8, 4), fill="x", expand=(col == "path"))
+            lbl.grid(row=0, column=index, sticky="ew", padx=(8, 4))
             self._attach_row_bindtag(lbl)
             labels[col] = lbl
 
@@ -242,6 +280,10 @@ class FileTable(ctk.CTkFrame):
 
     # ── internals ──
 
+    def _configure_columns(self, widget):
+        for index, (minsize, weight) in enumerate(self._column_specs):
+            widget.grid_columnconfigure(index, minsize=minsize, weight=weight)
+
     def _attach_row_bindtag(self, widget):
         """Route events from CTk widgets and their native children through row handlers."""
         tags = widget.bindtags()
@@ -249,6 +291,21 @@ class FileTable(ctk.CTkFrame):
             widget.bindtags((self._row_bindtag,) + tags)
         for child in widget.winfo_children():
             self._attach_row_bindtag(child)
+
+    def _bind_optional_touchpad(self, widget):
+        """Bind Tk 9's touchpad event when the running Tk supports it."""
+        if widget is None:
+            return
+        try:
+            widget.bind("<TouchpadScroll>", self._touchpad_scroll, add="+")
+        except tk.TclError:
+            pass
+
+    def _bind_optional_touchpad_class(self):
+        try:
+            self.bind_class(self._row_bindtag, "<TouchpadScroll>", self._touchpad_scroll)
+        except tk.TclError:
+            pass
 
     def _update_scrollregion(self, event=None):
         """Update canvas scrollregion only when content size actually changes."""
@@ -263,16 +320,26 @@ class FileTable(ctk.CTkFrame):
         self._canvas.itemconfig(self._win, width=event.width)
 
     def _scroll_wheel(self, event):
-        """macOS: delta > 0 = scroll up, delta < 0 = scroll down."""
-        # Use "units" for smooth line-by-line scrolling (≈ 3 lines per notch)
-        units = -3 if event.delta > 0 else 3
-        self._canvas.yview_scroll(units, "units")
+        """Preserve native macOS wheel and trackpad delta magnitude."""
+        if sys.platform == "darwin":
+            if event.delta:
+                self._canvas.yview("scroll", -event.delta, "units")
+        else:
+            units = -3 if event.delta > 0 else 3
+            self._canvas.yview_scroll(units, "units")
         return "break"
 
     def _scroll_wheel_linux(self, event):
         """Linux: Button-4 = scroll up, Button-5 = scroll down."""
         units = -3 if event.num == 4 else 3
         self._canvas.yview_scroll(units, "units")
+        return "break"
+
+    def _touchpad_scroll(self, event):
+        """Apply Tk 9's packed vertical touchpad delta to the table canvas."""
+        _, delta_y = _decode_touchpad_delta(event.delta)
+        if delta_y:
+            self._canvas.yview_scroll(delta_y, "units")
         return "break"
 
     def _click(self, event, idx):
@@ -625,6 +692,7 @@ class WxCleanerApp:
         self.summary_label.configure(text="")
         self.btn_select_all.pack_forget()
         self.btn_scan.configure(state="disabled", text="扫描中...")
+        self.btn_cancel.configure(state="normal")
         self.btn_cancel.pack(side="left")
 
         threading.Thread(target=self.run_scan, args=(path,), daemon=True).start()
@@ -655,11 +723,13 @@ class WxCleanerApp:
                 self.root.after(0, self._scan_cancelled)
             else:
                 self.root.after(0, self.update_results)
-        except Exception as e:
+        except Exception as error:
+            error_text = str(error)
+
             def _error():
                 if self._closing:
                     return
-                messagebox.showerror("错误", f"扫描出错: {e}")
+                messagebox.showerror("错误", f"扫描出错: {error_text}")
                 self.status_label.configure(text="扫描失败", text_color=C.RED)
                 self.scanning = False
                 self._scan_cleanup()
@@ -672,7 +742,6 @@ class WxCleanerApp:
 
     def _scan_cleanup(self):
         self.progress.stop()
-        self.progress.set(0)
         self.btn_scan.configure(state="normal", text="开始扫描")
         self.btn_cancel.pack_forget()
 
