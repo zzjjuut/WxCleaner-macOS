@@ -1,8 +1,8 @@
 # WxCleaner macOS - 微信重复文件清理工具
 
-这是 WxCleaner 的 macOS Apple Silicon 适配版本。`v1.5.0` 使用
+这是 WxCleaner 的 macOS Apple Silicon 适配版本。`v2.0.0` 使用
 [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) 重建了 Apple 风格界面，
-提供可直接双击运行的 `WxCleaner-1.5.0.app`。
+提供可直接双击运行的 `WxCleaner-2.0.0.app`。
 
 ## 来源与致谢
 
@@ -21,7 +21,8 @@ WxCleaner 是一款专为清理微信接收文件而设计的轻量级桌面工�
 *   **安全清理**: 
     *   文件并非直接永久删除，而是移动至 **系统回收站**，防止误删。
     *   删除前提供二次确认，确保操作安全。
-*   **Apple 风格 UI**: 基于 `CustomTkinter` 重建的轻量界面，支持明亮主题和 macOS 交互习惯。
+*   **Apple 风格 UI**: 基于 `CustomTkinter` 重建的轻量界面，支持明亮主题、键盘快捷键和 macOS 交互习惯。
+*   **可取消扫描**: 长目录扫描期间可以取消，关闭窗口时会请求后台任务尽快退出。
 
 ## 🛠️ 技术栈
 
@@ -29,7 +30,7 @@ WxCleaner 是一款专为清理微信接收文件而设计的轻量级桌面工�
 *   **GUI 框架**: [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) (基于 Tkinter)
 *   **核心库**: 
     *   `send2trash`: 实现跨平台的安全删除（移至回收站）。
-    *   `Pillow`: 图像处理支持。
+    *   `PyInstaller`: 生成可独立运行的 macOS `.app` 发布包。
 
 ## 📁 目录结构
 
@@ -39,6 +40,8 @@ source/              Python 源码
 tests/               自动化测试
 assets/              应用图标和打包资源
 packaging/           PyInstaller 配置
+scripts/             本地构建与发布检查脚本
+legacy/              历史 bundled 入口，仅作参考
 build/               构建中间产物和历史副本
 environment/.venv/   已安装依赖的 Python 虚拟环境
 ```
@@ -48,7 +51,7 @@ environment/.venv/   已安装依赖的 Python 虚拟环境
 ### macOS Apple Silicon
 
 从本仓库的 [Releases](https://github.com/zzjjuut/WxCleaner-macOS/releases) 下载
-`WxCleaner-macOS-arm64.zip`，解压后双击 `WxCleaner-1.5.0.app`。首次运行时，macOS 可能要求授予
+`WxCleaner-macOS-arm64-v2.0.0.zip`，解压后双击 `WxCleaner-2.0.0.app`。首次运行时，macOS 可能要求授予
 应用访问微信文件目录的权限；如果 Gatekeeper 拦截未签名应用，请在 Finder 中右键应用并选择
 “打开”。
 
@@ -65,6 +68,7 @@ environment/.venv/   已安装依赖的 Python 虚拟环境
     ```
 3.  **安装依赖**:
     ```bash
+    python3 -m venv environment/.venv
     environment/.venv/bin/pip install -r requirements.txt
     ```
 4.  **运行程序**:
@@ -87,14 +91,25 @@ environment/.venv/   已安装依赖的 Python 虚拟环境
 如果您想自行打包 macOS 应用：
 
 ```bash
-environment/.venv/bin/pip install -r requirements.txt pyinstaller
-environment/.venv/bin/pyinstaller --noconfirm --clean --name WxCleaner \
-    --distpath build/pyinstaller/dist --workpath build/pyinstaller/work \
-    packaging/WxCleaner.spec
+scripts/build_release.sh
 ```
 
-打包完成后，应用将位于 `build/pyinstaller/dist/WxCleaner.app`；交付用应用位于
-`app/WxCleaner-1.5.0.app`。当前发布包针对 Apple Silicon (`arm64`) 构建。
+打包脚本会依次安装构建依赖、运行测试、执行 PyInstaller、清理扩展属性、检查
+`codesign --verify --deep --strict`、确认主执行文件为 `arm64`，并生成：
+
+```text
+app/WxCleaner-2.0.0.app
+build/release/WxCleaner-macOS-arm64-v2.0.0.zip
+build/release/WxCleaner-macOS-arm64-v2.0.0.zip.sha256
+```
+
+当前发布包针对 Apple Silicon (`arm64`) 构建。
+
+如果系统默认 `python3` 缺少 Tk 支持，可以指定带 Tk 的解释器：
+
+```bash
+PYTHON_BOOTSTRAP=/Library/Frameworks/Python.framework/Versions/3.13/bin/python3 scripts/build_release.sh
+```
 
 运行测试：
 

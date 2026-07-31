@@ -17,6 +17,7 @@ import sys
 from send2trash import send2trash
 from file_actions import move_to_trash
 from scanner import find_duplicates
+from version import __version__
 
 
 # ════════════════════════════════════════════════════════════
@@ -90,6 +91,7 @@ class FileTable(ctk.CTkFrame):
 
         self._on_select = kw.pop("on_select", None)
         self._on_menu = kw.pop("on_menu", None)
+        self._row_bindtag = f"FileTableRow{id(self)}"
 
         # ── header ──
         self._header = ctk.CTkFrame(self, fg_color=C.BG_SEC, corner_radius=8, height=36)
@@ -127,13 +129,25 @@ class FileTable(ctk.CTkFrame):
         self._body.bind("<Configure>", self._update_scrollregion)
         self._canvas.bind("<Configure>", self._on_canvas_resize)
 
-        # Scroll bindings — on canvas, body, and will also be added per-row in insert()
+        # ── Event delegation: one row bindtag shared by row frames and labels ──
         self._canvas.bind("<MouseWheel>", self._scroll_wheel)
         self._canvas.bind("<Button-4>", self._scroll_wheel_linux)
         self._canvas.bind("<Button-5>", self._scroll_wheel_linux)
+
+        self._body.bind("<Button-1>", self._on_body_click)
+        self._body.bind("<Button-2>", self._on_body_menu)
+        self._body.bind("<Button-3>", self._on_body_menu)
         self._body.bind("<MouseWheel>", self._scroll_wheel)
         self._body.bind("<Button-4>", self._scroll_wheel_linux)
         self._body.bind("<Button-5>", self._scroll_wheel_linux)
+        self.bind_class(self._row_bindtag, "<Button-1>", self._on_body_click)
+        self.bind_class(self._row_bindtag, "<Button-2>", self._on_body_menu)
+        self.bind_class(self._row_bindtag, "<Button-3>", self._on_body_menu)
+        self.bind_class(self._row_bindtag, "<MouseWheel>", self._scroll_wheel)
+        self.bind_class(self._row_bindtag, "<Button-4>", self._scroll_wheel_linux)
+        self.bind_class(self._row_bindtag, "<Button-5>", self._scroll_wheel_linux)
+        self.bind_class(self._row_bindtag, "<Enter>", self._on_body_enter)
+        self.bind_class(self._row_bindtag, "<Leave>", self._on_body_leave)
 
     # ── public API ──
 
@@ -143,6 +157,10 @@ class FileTable(ctk.CTkFrame):
         rf = ctk.CTkFrame(self._body, fg_color=row_fg, corner_radius=0, height=S.ROW_H)
         rf.pack(fill="x")
         rf.pack_propagate(False)
+
+        # Store row index on the frame for event delegation
+        rf.idx = idx
+        self._attach_row_bindtag(rf)
 
         labels = {}
         for col, w in zip(self.col_keys, self.col_widths):
@@ -154,27 +172,8 @@ class FileTable(ctk.CTkFrame):
                 text_color=color, anchor=anchor,
             )
             lbl.pack(side="left", padx=(8, 4), fill="x", expand=(col == "path"))
+            self._attach_row_bindtag(lbl)
             labels[col] = lbl
-
-        # events on every child widget → route to row handler
-        for child in rf.winfo_children():
-            child.bind("<Button-1>", lambda e, i=idx: self._click(e, i))
-            child.bind("<Button-2>", lambda e, i=idx: self._menu(e, i))
-            child.bind("<Button-3>", lambda e, i=idx: self._menu(e, i))
-            child.bind("<MouseWheel>", self._scroll_wheel)
-            child.bind("<Button-4>", self._scroll_wheel_linux)
-            child.bind("<Button-5>", self._scroll_wheel_linux)
-            child.bind("<Enter>", lambda e, f=rf: self._hover(f, True))
-            child.bind("<Leave>", lambda e, f=rf, i=idx: self._hover(f, False, i))
-
-        rf.bind("<Button-1>", lambda e, i=idx: self._click(e, i))
-        rf.bind("<Button-2>", lambda e, i=idx: self._menu(e, i))
-        rf.bind("<Button-3>", lambda e, i=idx: self._menu(e, i))
-        rf.bind("<MouseWheel>", self._scroll_wheel)
-        rf.bind("<Button-4>", self._scroll_wheel_linux)
-        rf.bind("<Button-5>", self._scroll_wheel_linux)
-        rf.bind("<Enter>", lambda e, f=rf: self._hover(f, True))
-        rf.bind("<Leave>", lambda e, f=rf, i=idx: self._hover(f, False, i))
 
         self.rows.append((rf, labels, dict(values), tags))
 
@@ -222,9 +221,10 @@ class FileTable(ctk.CTkFrame):
             self.rows[idx][0].destroy()
             self.rows.pop(idx)
             self.selected.discard(idx)
-            # re-index
+            # re-index selected set and row frame indices
             self.selected = {i if i < idx else i - 1 for i in self.selected if i != idx}
-            self._reindex()
+            for i in range(idx, len(self.rows)):
+                self.rows[i][0].idx = i
 
     def set_tags(self, idx, tags):
         if 0 <= idx < len(self.rows):
@@ -235,14 +235,20 @@ class FileTable(ctk.CTkFrame):
 
     def set_values(self, idx, values):
         if 0 <= idx < len(self.rows):
-            old = self.rows[idx][2]
-            old.update(values)
-            self.rows[idx] = (self.rows[idx][0], self.rows[idx][1], list(old), self.rows[idx][3])
+            self.rows[idx][2].update(values)
             for col, lbl in self.rows[idx][1].items():
                 if col in values:
                     lbl.configure(text=str(values[col]))
 
     # ── internals ──
+
+    def _attach_row_bindtag(self, widget):
+        """Route events from CTk widgets and their native children through row handlers."""
+        tags = widget.bindtags()
+        if self._row_bindtag not in tags:
+            widget.bindtags((self._row_bindtag,) + tags)
+        for child in widget.winfo_children():
+            self._attach_row_bindtag(child)
 
     def _update_scrollregion(self, event=None):
         """Update canvas scrollregion only when content size actually changes."""
@@ -296,14 +302,6 @@ class FileTable(ctk.CTkFrame):
         if self._on_menu:
             self._on_menu(event)
 
-    def _hover(self, frame, entering, idx=None):
-        if entering:
-            if idx is not None and idx not in self.selected:
-                frame.configure(fg_color=C.BG_HOVER)
-        else:
-            if idx is not None:
-                self._apply_row_bg(idx)
-
     def _repaint(self):
         for i in range(len(self.rows)):
             self._apply_row_bg(i)
@@ -315,26 +313,40 @@ class FileTable(ctk.CTkFrame):
         else:
             rf.configure(fg_color=C.BG_ROW_ALT if idx % 2 else C.BG)
 
-    def _reindex(self):
-        """Re-bind row indices after a deletion."""
-        for new_idx, (rf, labels, vals, tags) in enumerate(self.rows):
-            for child in rf.winfo_children():
-                child.bind("<Button-1>", lambda e, i=new_idx: self._click(e, i))
-                child.bind("<Button-2>", lambda e, i=new_idx: self._menu(e, i))
-                child.bind("<Button-3>", lambda e, i=new_idx: self._menu(e, i))
-                child.bind("<MouseWheel>", self._scroll_wheel)
-                child.bind("<Button-4>", self._scroll_wheel_linux)
-                child.bind("<Button-5>", self._scroll_wheel_linux)
-                child.bind("<Enter>", lambda e, f=rf: self._hover(f, True))
-                child.bind("<Leave>", lambda e, f=rf, i=new_idx: self._hover(f, False, i))
-            rf.bind("<Button-1>", lambda e, i=new_idx: self._click(e, i))
-            rf.bind("<Button-2>", lambda e, i=new_idx: self._menu(e, i))
-            rf.bind("<Button-3>", lambda e, i=new_idx: self._menu(e, i))
-            rf.bind("<MouseWheel>", self._scroll_wheel)
-            rf.bind("<Button-4>", self._scroll_wheel_linux)
-            rf.bind("<Button-5>", self._scroll_wheel_linux)
-            rf.bind("<Enter>", lambda e, f=rf: self._hover(f, True))
-            rf.bind("<Leave>", lambda e, f=rf, i=new_idx: self._hover(f, False, i))
+    # ── Event delegation handlers ──
+
+    @staticmethod
+    def _get_row_idx(event):
+        """Walk up from event.widget to find a frame with .idx attribute."""
+        w = event.widget
+        while w:
+            idx = getattr(w, "idx", None)
+            if idx is not None:
+                return idx
+            w = w.master
+        return None
+
+    def _on_body_click(self, event):
+        idx = self._get_row_idx(event)
+        if idx is not None:
+            self._click(event, idx)
+        return "break"
+
+    def _on_body_menu(self, event):
+        idx = self._get_row_idx(event)
+        if idx is not None:
+            self._menu(event, idx)
+        return "break"
+
+    def _on_body_enter(self, event):
+        idx = self._get_row_idx(event)
+        if idx is not None and idx not in self.selected:
+            self.rows[idx][0].configure(fg_color=C.BG_HOVER)
+
+    def _on_body_leave(self, event):
+        idx = self._get_row_idx(event)
+        if idx is not None:
+            self._apply_row_bg(idx)
 
     @staticmethod
     def _col_label(key):
@@ -360,7 +372,7 @@ class FileTable(ctk.CTkFrame):
 class WxCleanerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("WxCleaner - 微信重复文件清理工具")
+        self.root.title(f"WxCleaner {__version__} - 微信重复文件清理工具")
         self.root.geometry("1100x800")
         self.root.minsize(900, 600)
 
@@ -379,6 +391,8 @@ class WxCleanerApp:
         # state
         self.duplicates = {}
         self.scanning = False
+        self._cancel_event = threading.Event()
+        self._closing = False
 
         # scan path
         default_path = ""
@@ -389,6 +403,10 @@ class WxCleanerApp:
         self.scan_path = tk.StringVar(value=default_path)
 
         self._setup_ui()
+        self._setup_keyboard_shortcuts()
+
+        # Graceful shutdown: stop background threads on window close
+        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
 
     # ────────────────────────────────────────────────────────
     #  UI
@@ -445,7 +463,16 @@ class WxCleanerApp:
             text_color="white",
             command=self.start_scan_thread,
         )
-        self.btn_scan.pack(side="left")
+        self.btn_scan.pack(side="left", padx=(0, 8))
+
+        self.btn_cancel = ctk.CTkButton(
+            row, text="取消", font=T.BODY,
+            width=80, height=S.BTN_H, corner_radius=8,
+            fg_color=C.BG, text_color=C.TEXT2, border_color=C.BORDER,
+            border_width=1, hover_color=C.BG_SEC,
+            command=self.cancel_scan,
+        )
+        # hidden until a scan starts
 
     # ---- Summary ----
 
@@ -532,6 +559,22 @@ class WxCleanerApp:
         self.btn_delete.pack(side="right")
 
     # ────────────────────────────────────────────────────────
+    #  Window lifecycle & keyboard shortcuts
+    # ────────────────────────────────────────────────────────
+
+    def _on_closing(self):
+        self._closing = True
+        self._cancel_event.set()
+        self.root.destroy()
+
+    def _setup_keyboard_shortcuts(self):
+        self.root.bind("<Command-w>", lambda e: self._on_closing())
+        self.root.bind("<Command-q>", lambda e: self._on_closing())
+        self.root.bind("<Command-b>", lambda e: self.browse_folder())
+        self.root.bind("<Return>", lambda e: self.start_scan_thread())
+        self.root.bind("<Escape>", lambda e: self.cancel_scan() if self.scanning else None)
+
+    # ────────────────────────────────────────────────────────
     #  Helpers
     # ────────────────────────────────────────────────────────
 
@@ -565,11 +608,15 @@ class WxCleanerApp:
             self.scan_path.set(path)
 
     def start_scan_thread(self):
+        if self.scanning:
+            return
+
         path = self.scan_path.get()
         if not path or not os.path.exists(path):
             messagebox.showwarning("警告", "请选择有效的文件夹")
             return
 
+        self._cancel_event.clear()
         self.scanning = True
         self.status_label.configure(text="正在初始化...", text_color=C.ACCENT)
         self.progress.set(0)
@@ -577,39 +624,65 @@ class WxCleanerApp:
         self.selection_label.configure(text="")
         self.summary_label.configure(text="")
         self.btn_select_all.pack_forget()
+        self.btn_scan.configure(state="disabled", text="扫描中...")
+        self.btn_cancel.pack(side="left")
 
         threading.Thread(target=self.run_scan, args=(path,), daemon=True).start()
 
+    def cancel_scan(self):
+        self._cancel_event.set()
+        self.status_label.configure(text="正在取消...", text_color=C.ORANGE)
+        self.btn_cancel.configure(state="disabled")
+
     def run_scan(self, path):
         def progress_callback(current, total, status_text):
+            if self._cancel_event.is_set() or self._closing:
+                return
             def _update():
                 self.status_label.configure(text=status_text, text_color=C.TEXT2)
                 if total > 0:
-                    if "统计" in status_text:
-                        self.progress.start()
-                    else:
-                        self.progress.stop()
-                        if "筛选" in status_text:
-                            pct = (current / total) * 50
-                        else:
-                            pct = (current / total) * 100
-                        self.progress.set(pct / 100)
+                    self.progress.stop()
+                    pct = (current / total) * 100
+                    self.progress.set(min(pct / 100, 1.0))
             self.root.after(0, _update)
 
         try:
-            self.duplicates = find_duplicates(path, progress_callback=progress_callback)
-            self.root.after(0, self.update_results)
+            if self._cancel_event.is_set():
+                return
+            self.duplicates = find_duplicates(path, progress_callback=progress_callback,
+                                               cancel_event=self._cancel_event)
+            if self._cancel_event.is_set():
+                self.root.after(0, self._scan_cancelled)
+            else:
+                self.root.after(0, self.update_results)
         except Exception as e:
             def _error():
+                if self._closing:
+                    return
                 messagebox.showerror("错误", f"扫描出错: {e}")
                 self.status_label.configure(text="扫描失败", text_color=C.RED)
                 self.scanning = False
+                self._scan_cleanup()
             self.root.after(0, _error)
 
+    def _scan_cancelled(self):
+        self.status_label.configure(text="扫描已取消", text_color=C.ORANGE)
+        self.scanning = False
+        self._scan_cleanup()
+
+    def _scan_cleanup(self):
+        self.progress.stop()
+        self.progress.set(0)
+        self.btn_scan.configure(state="normal", text="开始扫描")
+        self.btn_cancel.pack_forget()
+
     def update_results(self):
+        if self._closing:
+            return
         self.scanning = False
         self.progress.stop()
         self.progress.set(1.0)
+        self._scan_cleanup()
 
         total_groups = len(self.duplicates)
         total_files = sum(len(p) for p in self.duplicates.values())
@@ -675,15 +748,16 @@ class WxCleanerApp:
             return
         path = self.tree.item_values(selected[0], "path")
         try:
-            folder = os.path.dirname(str(path))
+            file_path = str(path)
             if sys.platform == "darwin":
-                subprocess.Popen(["open", folder])
+                # macOS: "open -R" reveals and selects the file in Finder
+                subprocess.Popen(["open", "-R", file_path])
             elif sys.platform == "win32":
-                os.startfile(folder)
+                subprocess.Popen(["explorer", "/select,", file_path])
             else:
-                subprocess.Popen(["xdg-open", folder])
+                subprocess.Popen(["xdg-open", os.path.dirname(file_path)])
         except Exception as e:
-            messagebox.showerror("错误", f"无法打开文件夹: {e}")
+            messagebox.showerror("错误", f"无法打开文件位置: {e}")
 
     def unmark_item(self):
         for idx in self.tree.selection():

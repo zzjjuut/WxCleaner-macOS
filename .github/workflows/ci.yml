@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test-and-build:
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install test dependencies
+        run: |
+          python -c "import tkinter"
+          python -m venv environment/.venv
+          environment/.venv/bin/python -m pip install --upgrade pip
+          environment/.venv/bin/python -m pip install -r requirements.txt pytest
+
+      - name: Run tests
+        run: environment/.venv/bin/python -m pytest tests -v
+
+      - name: Build pyinstaller release artifact
+        run: SKIP_TESTS=1 bash scripts/build_release.sh
+
+      - name: Upload app archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: WxCleaner-macOS-arm64-v2.0.0
+          path: |
+            build/release/WxCleaner-macOS-arm64-v2.0.0.zip
+            build/release/WxCleaner-macOS-arm64-v2.0.0.zip.sha256

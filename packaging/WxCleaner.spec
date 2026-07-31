@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+APP_VERSION = "2.0.0"
 
 a = Analysis(
     ['../source/main.py'],
@@ -12,7 +13,7 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
-    optimize=0,
+    optimize=2,
 )
 pyz = PYZ(a.pure)
 
@@ -29,7 +30,7 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch=None,
+    target_arch='arm64',
     codesign_identity=None,
     entitlements_file=None,
     icon=['../assets/WxCleaner.icns'],
@@ -47,6 +48,10 @@ app = BUNDLE(
     coll,
     name='WxCleaner.app',
     icon='../assets/WxCleaner.icns',
-    version='1.5.0',
-    bundle_identifier=None,
+    version=APP_VERSION,
+    bundle_identifier='com.zzjjuut.WxCleaner',
+    info_plist={
+        'CFBundleShortVersionString': APP_VERSION,
+        'CFBundleVersion': APP_VERSION,
+    },
 )
