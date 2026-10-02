@@ -22,8 +22,11 @@ def _make_root():
         root = ctk.CTk()
     except tk.TclError as error:
         pytest.skip(f"Tk display unavailable: {error}")
-    root.geometry("500x220")
-    root.withdraw()
+
+    # macOS Aqua 只向已映射的窗口分发合成事件，withdraw 会让点击/滚轮
+    # 事件静默丢失；把窗口放到屏幕外，既保持映射又不干扰桌面。
+    offscreen = root.winfo_screenwidth() + 100
+    root.geometry(f"500x220+{offscreen}+100")
     return root
 
 
@@ -167,7 +170,6 @@ def test_path_column_resizes_without_moving_fixed_columns(tk_root):
         if table is not None:
             table.destroy()
         root.geometry(original_geometry)
-        root.withdraw()
         root.update_idletasks()
 
 
@@ -205,7 +207,7 @@ def test_mousewheel_on_body_background_canvas_scrolls_rows(tk_root):
         table = _make_scrollable_table(root)
         assert table._canvas.yview()[0] == 0.0
 
-        table._body._canvas.event_generate("<MouseWheel>", delta=-120, x=5, y=5)
+        table._canvas.event_generate("<MouseWheel>", delta=-120, x=5, y=5)
         root.update()
 
         assert table._canvas.yview()[0] > 0.0

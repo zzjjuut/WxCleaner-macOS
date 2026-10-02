@@ -8,6 +8,7 @@ All original functionality preserved.
 
 import tkinter as tk
 from tkinter import filedialog, messagebox
+from tkinter import font as tkfont
 import customtkinter as ctk
 import threading
 import os
@@ -113,6 +114,8 @@ class FileTable(ctk.CTkFrame):
         self._on_select = kw.pop("on_select", None)
         self._on_menu = kw.pop("on_menu", None)
         self._row_bindtag = f"FileTableRow{id(self)}"
+        # 共享字体对象：元组字体每个标签都会让 Tk 重新解析，1 万行差距可观
+        self._row_font = tkfont.Font(family=T._f, size=T.BODY[1])
 
         # ── shared table viewport ──
         self.grid_columnconfigure(0, weight=1)
@@ -137,6 +140,9 @@ class FileTable(ctk.CTkFrame):
         self._separator.grid(row=1, column=0, sticky="ew", padx=(4, 0))
 
         # ─ scrollable body ──
+        # 行 frame 直接以独立 window item 挂在 canvas 上（y = 行号 × 行高），
+        # 而不是打包进一个会不断长高的 body frame：body 每增高一次，
+        # Tk 都会对全部子控件做一次 O(n) 重排版，万行级时每批都卡。
         scroll_increment = 8 if sys.platform == "darwin" else 0
         self._canvas = tk.Canvas(
             self, bg=C.BG, highlightthickness=0, bd=0,
@@ -154,28 +160,14 @@ class FileTable(ctk.CTkFrame):
         self._canvas.grid(row=2, column=0, sticky="nsew", padx=(4, 0), pady=2)
         self._scroll.grid(row=2, column=1, sticky="ns", padx=(0, 2), pady=2)
 
-        self._body = ctk.CTkFrame(self._canvas, fg_color=C.BG, corner_radius=0)
-        self._win = self._canvas.create_window((0, 0), window=self._body, anchor="nw")
-
-        # Only update scrollregion when content size changes (not on every configure)
-        self._last_scrollregion = None
-        self._body.bind("<Configure>", self._update_scrollregion)
+        self._row_windows = []  # 与 self.rows 平行的 canvas window item id
         self._canvas.bind("<Configure>", self._on_canvas_resize)
 
         # ── Event delegation: one row bindtag shared by row frames and labels ──
         self._canvas.bind("<MouseWheel>", self._scroll_wheel)
         self._canvas.bind("<Button-4>", self._scroll_wheel_linux)
         self._canvas.bind("<Button-5>", self._scroll_wheel_linux)
-
-        self._body.bind("<Button-1>", self._on_body_click)
-        self._body.bind("<Button-2>", self._on_body_menu)
-        self._body.bind("<Button-3>", self._on_body_menu)
-        self._body.bind("<MouseWheel>", self._scroll_wheel)
-        self._body.bind("<Button-4>", self._scroll_wheel_linux)
-        self._body.bind("<Button-5>", self._scroll_wheel_linux)
         self._bind_optional_touchpad(self._canvas)
-        self._bind_optional_touchpad(self._body)
-        self._bind_optional_touchpad(getattr(self._body, "_canvas", None))
         self.bind_class(self._row_bindtag, "<Button-1>", self._on_body_click)
         self.bind_class(self._row_bindtag, "<Button-2>", self._on_body_menu)
         self.bind_class(self._row_bindtag, "<Button-3>", self._on_body_menu)
@@ -193,8 +185,7 @@ class FileTable(ctk.CTkFrame):
         row_fg = C.BG_ROW_ALT if idx % 2 else C.BG
         # 原生 tk 控件比 CTk 轻一个数量级，万行级结果不再冻结 UI；
         # 行高、grid 列轨、bindtag 委托与 CTk 版本保持一致。
-        rf = tk.Frame(self._body, bg=row_fg, height=S.ROW_H)
-        rf.pack(fill="x")
+        rf = tk.Frame(self._canvas, bg=row_fg, height=S.ROW_H)
         rf.grid_propagate(False)
         self._configure_columns(rf)
 
@@ -209,7 +200,7 @@ class FileTable(ctk.CTkFrame):
             anchor = "center" if col in ("num", "size", "mtime", "status") else "w"
             color = self._tag_color(col, tags)
             lbl = tk.Label(
-                rf, text=str(val), font=T.BODY,
+                rf, text=str(val), font=self._row_font,
                 fg=color, bg=row_fg, anchor=anchor,
                 highlightthickness=0, bd=0,
             )
@@ -217,11 +208,19 @@ class FileTable(ctk.CTkFrame):
             self._attach_row_bindtag(lbl)
             labels[col] = lbl
 
+        win = self._canvas.create_window(
+            (0, idx * S.ROW_H), window=rf, anchor="nw",
+            width=max(self._canvas.winfo_width(), 1),
+        )
+        self._row_windows.append(win)
         self.rows.append((rf, labels, dict(values), tags))
+        self._update_scrollregion_len(idx + 1)
 
     def clear(self):
-        for rf, _, _, _ in self.rows:
+        for (rf, _, _, _), win in zip(self.rows, self._row_windows):
+            self._canvas.delete(win)
             rf.destroy()
+        self._row_windows.clear()
         self.rows.clear()
         self.selected.clear()
         self._last_idx = None
@@ -260,6 +259,8 @@ class FileTable(ctk.CTkFrame):
 
     def delete(self, idx):
         if 0 <= idx < len(self.rows):
+            self._canvas.delete(self._row_windows[idx])
+            self._row_windows.pop(idx)
             self.rows[idx][0].destroy()
             self.rows.pop(idx)
             self.selected.discard(idx)
@@ -272,6 +273,8 @@ class FileTable(ctk.CTkFrame):
                     self._last_idx -= 1
             for i in range(idx, len(self.rows)):
                 self.rows[i][0].idx = i
+                self._canvas.coords(self._row_windows[i], 0, i * S.ROW_H)
+            self._update_scrollregion_len(len(self.rows))
 
     def set_tags(self, idx, tags):
         if 0 <= idx < len(self.rows):
@@ -316,17 +319,16 @@ class FileTable(ctk.CTkFrame):
         except tk.TclError:
             pass
 
-    def _update_scrollregion(self, event=None):
-        """Update canvas scrollregion only when content size actually changes."""
-        bbox = self._canvas.bbox("all")
-        if bbox != self._last_scrollregion:
-            self._last_scrollregion = bbox
-            if bbox:
-                self._canvas.configure(scrollregion=bbox)
+    def _update_scrollregion_len(self, n_rows):
+        """O(1): region tracks the fixed row height, not widget-requested sizes."""
+        width = max(self._canvas.winfo_width(), 1)
+        self._canvas.configure(scrollregion=(0, 0, width, n_rows * S.ROW_H))
 
     def _on_canvas_resize(self, event=None):
-        """Keep the inner body frame as wide as the canvas viewport."""
-        self._canvas.itemconfig(self._win, width=event.width)
+        """Keep every row as wide as the canvas viewport (rows are window items)."""
+        for win in self._row_windows:
+            self._canvas.itemconfig(win, width=event.width)
+        self._update_scrollregion_len(len(self._row_windows))
 
     def _scroll_wheel(self, event):
         """Preserve native macOS wheel and trackpad delta magnitude."""
@@ -457,7 +459,7 @@ class FileTable(ctk.CTkFrame):
 
 class WxCleanerApp:
     # 分批渲染：每批插入的行数与批间隔，避免万行级结果一次性建控件冻结 UI
-    RENDER_BATCH = 300
+    RENDER_BATCH = 80
     RENDER_DELAY_MS = 10
 
     def __init__(self, root):
