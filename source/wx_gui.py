@@ -191,13 +191,16 @@ class FileTable(ctk.CTkFrame):
     def insert(self, values, tags=()):
         idx = len(self.rows)
         row_fg = C.BG_ROW_ALT if idx % 2 else C.BG
-        rf = ctk.CTkFrame(self._body, fg_color=row_fg, corner_radius=0, height=S.ROW_H)
+        # 原生 tk 控件比 CTk 轻一个数量级，万行级结果不再冻结 UI；
+        # 行高、grid 列轨、bindtag 委托与 CTk 版本保持一致。
+        rf = tk.Frame(self._body, bg=row_fg, height=S.ROW_H)
         rf.pack(fill="x")
         rf.grid_propagate(False)
         self._configure_columns(rf)
 
         # Store row index on the frame for event delegation
         rf.idx = idx
+        rf._bg_state = "alt" if idx % 2 else "normal"
         self._attach_row_bindtag(rf)
 
         labels = {}
@@ -205,9 +208,10 @@ class FileTable(ctk.CTkFrame):
             val = values.get(col, "")
             anchor = "center" if col in ("num", "size", "mtime", "status") else "w"
             color = self._tag_color(col, tags)
-            lbl = ctk.CTkLabel(
+            lbl = tk.Label(
                 rf, text=str(val), font=T.BODY,
-                text_color=color, anchor=anchor,
+                fg=color, bg=row_fg, anchor=anchor,
+                highlightthickness=0, bd=0,
             )
             lbl.grid(row=0, column=index, sticky="ew", padx=(8, 4))
             self._attach_row_bindtag(lbl)
@@ -269,7 +273,7 @@ class FileTable(ctk.CTkFrame):
             self.rows[idx] = (self.rows[idx][0], self.rows[idx][1], self.rows[idx][2], tags)
             # update status label color
             color = self._tag_color("status", tags)
-            self.rows[idx][1].get("status", tk.NONE).configure(text_color=color)
+            self.rows[idx][1].get("status", tk.NONE).configure(fg=color)
 
     def set_values(self, idx, values):
         if 0 <= idx < len(self.rows):
@@ -374,11 +378,21 @@ class FileTable(ctk.CTkFrame):
             self._apply_row_bg(i)
 
     def _apply_row_bg(self, idx):
-        rf = self.rows[idx][0]
         if idx in self.selected:
-            rf.configure(fg_color=C.BG_SEL)
+            self._paint_row_bg(idx, C.BG_SEL, "selected")
         else:
-            rf.configure(fg_color=C.BG_ROW_ALT if idx % 2 else C.BG)
+            self._paint_row_bg(idx, C.BG_ROW_ALT if idx % 2 else C.BG,
+                               "alt" if idx % 2 else "normal")
+
+    def _paint_row_bg(self, idx, color, state):
+        """Paint row background unless it already shows that state (skip on 10k+ rows)."""
+        rf = self.rows[idx][0]
+        if getattr(rf, "_bg_state", None) == state:
+            return
+        rf._bg_state = state
+        rf.configure(bg=color)
+        for lbl in self.rows[idx][1].values():
+            lbl.configure(bg=color)
 
     # ── Event delegation handlers ──
 
@@ -408,7 +422,7 @@ class FileTable(ctk.CTkFrame):
     def _on_body_enter(self, event):
         idx = self._get_row_idx(event)
         if idx is not None and idx not in self.selected:
-            self.rows[idx][0].configure(fg_color=C.BG_HOVER)
+            self._paint_row_bg(idx, C.BG_HOVER, "hover")
 
     def _on_body_leave(self, event):
         idx = self._get_row_idx(event)
@@ -437,6 +451,10 @@ class FileTable(ctk.CTkFrame):
 # ════════════════════════════════════════════════════════════
 
 class WxCleanerApp:
+    # 分批渲染：每批插入的行数与批间隔，避免万行级结果一次性建控件冻结 UI
+    RENDER_BATCH = 300
+    RENDER_DELAY_MS = 10
+
     def __init__(self, root):
         self.root = root
         self.root.title(f"WxCleaner {__version__} - 微信重复文件清理工具")
@@ -757,6 +775,7 @@ class WxCleanerApp:
         total_files = sum(len(p) for p in self.duplicates.values())
         total_dup_size = 0
 
+        rows = []
         count = 1
         for h, paths in self.duplicates.items():
             paths.sort(key=lambda x: len(x))
@@ -778,23 +797,50 @@ class WxCleanerApp:
                 status = "保留" if i == 0 else "重复"
                 tags = ("original",) if i == 0 else ("duplicate",)
 
-                self.tree.insert(
-                    values={"num": count, "path": p, "size": size_str,
-                            "mtime": mtime_str, "status": status},
-                    tags=tags,
-                )
+                rows.append((
+                    {"num": count, "path": p, "size": size_str,
+                     "mtime": mtime_str, "status": status},
+                    tags,
+                ))
                 count += 1
 
         # summary
         self.summary_label.configure(
             text=f"共 {total_groups} 组重复  ·  可释放 {self._format_size(total_dup_size)}"
         )
-        self.btn_select_all.pack(side="right")
-
-        self.status_label.configure(
-            text=f"完成 — 找到 {total_groups} 组重复，共 {total_files} 个文件",
-            text_color=C.GREEN,
+        self._render_done_status = (
+            f"完成 — 找到 {total_groups} 组重复，共 {total_files} 个文件",
+            C.GREEN,
         )
+        self.status_label.configure(text=self._render_done_status[0],
+                                    text_color=self._render_done_status[1])
+
+        # 分批插入行控件，插入完成前不放开"全选重复项"
+        self._pending_rows = rows
+        self._render_next_batch()
+
+    def _render_next_batch(self):
+        if self._closing:
+            self._pending_rows = []
+            return
+        batch = self._pending_rows[:self.RENDER_BATCH]
+        self._pending_rows = self._pending_rows[self.RENDER_BATCH:]
+
+        for values, tags in batch:
+            self.tree.insert(values, tags=tags)
+
+        if self._pending_rows:
+            done = len(self.tree.get_children())
+            remaining = len(self._pending_rows)
+            self.status_label.configure(
+                text=f"正在显示结果 {done}/{done + remaining}...",
+                text_color=C.TEXT2,
+            )
+            self.root.after(self.RENDER_DELAY_MS, self._render_next_batch)
+        else:
+            text, color = self._render_done_status
+            self.status_label.configure(text=text, text_color=color)
+            self.btn_select_all.pack(side="right")
 
     def on_tree_select(self):
         selected_items = self.tree.selection()

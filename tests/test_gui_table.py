@@ -118,13 +118,6 @@ def _make_full_table(root):
     return table
 
 
-def _first_tk_child(widget, class_name):
-    for child in widget.winfo_children():
-        if child.winfo_class() == class_name:
-            return child
-    raise AssertionError(f"No {class_name} child found in {widget}")
-
-
 def test_shared_header_row_geometry(tk_root):
     root = tk_root
     table = None
@@ -227,7 +220,7 @@ def test_mousewheel_on_internal_label_text_scrolls_rows(tk_root):
     table = None
     try:
         table = _make_scrollable_table(root)
-        text_widget = _first_tk_child(table.rows[0][1]["path"], "Label")
+        text_widget = table.rows[0][1]["path"]
         assert table._canvas.yview()[0] == 0.0
 
         text_widget.event_generate("<MouseWheel>", delta=-120, x=5, y=5)
@@ -257,7 +250,7 @@ def test_macos_scroll_preserves_delta_magnitude(tk_root):
     table = None
     try:
         table = _make_scrollable_table(root)
-        row_label = _first_tk_child(table.rows[0][1]["path"], "Label")
+        row_label = table.rows[0][1]["path"]
 
         table._canvas.yview_moveto(0)
         row_label.event_generate("<MouseWheel>", delta=-1, x=5, y=5)
@@ -317,6 +310,47 @@ def test_deleting_a_row_reindexes_later_cell_clicks(tk_root):
 
         assert table._get_row_idx(SimpleNamespace(widget=table.rows[0][1]["path"])) == 0
         assert table.item_values(0, "path") == "/tmp/b.txt"
+    finally:
+        if table is not None:
+            table.destroy()
+        root.update_idletasks()
+
+
+def test_rows_use_native_tk_widgets(tk_root):
+    root = tk_root
+    table = None
+    try:
+        table = _make_full_table(root)
+
+        # 行体与单元格使用原生 tk 控件（性能），表头保持 CTk（圆角外观）
+        assert type(table.rows[0][0]) is tk.Frame
+        assert type(table.rows[0][1]["path"]) is tk.Label
+        assert type(table._header) is not tk.Frame
+        assert int(table.rows[0][0].cget("height")) == 38
+    finally:
+        if table is not None:
+            table.destroy()
+        root.update_idletasks()
+
+
+def test_row_background_repaint_skips_unchanged_state(tk_root):
+    root = tk_root
+    table = None
+    try:
+        table = _make_full_table(root)
+        rf, labels, _, _ = table.rows[0]
+        configure_calls = []
+        original_configure = rf.configure
+        rf.configure = lambda **kwargs: (
+            configure_calls.append(kwargs), original_configure(**kwargs),
+        )[1]
+
+        table.selection_set([0])
+        table.selection_set([0])  # 同一状态重复重绘应跳过
+
+        bg_calls = [c for c in configure_calls if "bg" in c]
+        assert len(bg_calls) == 1
+        assert bg_calls[0]["bg"] == "#E8F0FE"
     finally:
         if table is not None:
             table.destroy()
