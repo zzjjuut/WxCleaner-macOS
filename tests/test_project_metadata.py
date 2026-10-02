@@ -1,21 +1,26 @@
+import re
 from pathlib import Path
 
 
 ROOT = Path(__file__).parents[1]
 
 
-def test_version_metadata_is_2_0_0_everywhere():
-    version_file = ROOT / "source" / "version.py"
-    assert version_file.exists()
-    version_text = version_file.read_text()
-    assert '__version__ = "2.0.0"' in version_text
+def _app_version():
+    version_text = (ROOT / "source" / "version.py").read_text()
+    match = re.search(r'__version__\s*=\s*"([^"]+)"', version_text)
+    assert match, "source/version.py must define __version__"
+    return match.group(1)
+
+
+def test_version_metadata_is_consistent_everywhere():
+    version = _app_version()
 
     readme = (ROOT / "README.md").read_text()
-    assert "`v2.0.0`" in readme
-    assert "WxCleaner-2.0.0.app" in readme
+    assert f"`v{version}`" in readme
+    assert f"WxCleaner-{version}.app" in readme
 
     spec = (ROOT / "packaging" / "WxCleaner.spec").read_text()
-    assert 'APP_VERSION = "2.0.0"' in spec
+    assert f'APP_VERSION = "{version}"' in spec
     assert "target_arch='arm64'" in spec
     assert "bundle_identifier='com.zzjjuut.WxCleaner'" in spec
     assert "'CFBundleShortVersionString': APP_VERSION" in spec

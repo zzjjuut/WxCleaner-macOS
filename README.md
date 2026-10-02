@@ -1,8 +1,8 @@
 # WxCleaner macOS - 微信重复文件清理工具
 
-这是 WxCleaner 的 macOS Apple Silicon 适配版本。`v2.0.0` 使用
+这是 WxCleaner 的 macOS Apple Silicon 适配版本。`v2.0.1` 使用
 [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) 重建了 Apple 风格界面，
-提供可直接双击运行的 `WxCleaner-2.0.0.app`。
+提供可直接双击运行的 `WxCleaner-2.0.1.app`。
 
 ## 来源与致谢
 
@@ -51,7 +51,7 @@ environment/.venv/   已安装依赖的 Python 虚拟环境
 ### macOS Apple Silicon
 
 从本仓库的 [Releases](https://github.com/zzjjuut/WxCleaner-macOS/releases) 下载
-`WxCleaner-macOS-arm64-v2.0.0.zip`，解压后双击 `WxCleaner-2.0.0.app`。首次运行时，macOS 可能要求授予
+`WxCleaner-macOS-arm64-v2.0.1.zip`，解压后双击 `WxCleaner-2.0.1.app`。首次运行时，macOS 可能要求授予
 应用访问微信文件目录的权限；如果 Gatekeeper 拦截未签名应用，请在 Finder 中右键应用并选择
 “打开”。
 
@@ -98,9 +98,9 @@ scripts/build_release.sh
 `codesign --verify --deep --strict`、确认主执行文件为 `arm64`，并生成：
 
 ```text
-app/WxCleaner-2.0.0.app
-build/release/WxCleaner-macOS-arm64-v2.0.0.zip
-build/release/WxCleaner-macOS-arm64-v2.0.0.zip.sha256
+app/WxCleaner-2.0.1.app
+build/release/WxCleaner-macOS-arm64-v2.0.1.zip
+build/release/WxCleaner-macOS-arm64-v2.0.1.zip.sha256
 ```
 
 当前发布包针对 Apple Silicon (`arm64`) 构建。
