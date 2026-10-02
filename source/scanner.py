@@ -58,7 +58,7 @@ def find_duplicates(scan_path, progress_callback=None, cancel_event=None):
         if _check_cancelled(cancel_event):
             return {}
 
-    _safe_progress(progress_callback, 0, total_files if total_files else 1,
+    _safe_progress(progress_callback, 0, 100,
                    f"共找到 {total_files} 个文件，开始分析...")
 
     if total_files == 0:
@@ -82,7 +82,8 @@ def find_duplicates(scan_path, progress_callback=None, cancel_event=None):
 
             processed_count += 1
             if processed_count % 100 == 0:
-                _safe_progress(progress_callback, processed_count, total_files,
+                # 阶段 1 占总进度 0-50%；进度统一为 (百分比, 100) 的绝对刻度
+                _safe_progress(progress_callback, 50 * processed_count / total_files, 100,
                                "正在按大小筛选...")
 
     if _check_cancelled(cancel_event):

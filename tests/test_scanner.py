@@ -98,6 +98,25 @@ def test_progress_callback_called(tmp_path):
     assert any("全量校验" in c[2] or "完成" in c[2] for c in calls)
 
 
+def test_progress_is_monotonic_on_absolute_scale(tmp_path):
+    # 150 个相同文件：足以触发阶段 1 的周期上报，并进入阶段 2/3
+    for i in range(150):
+        (tmp_path / f"f_{i:03d}.txt").write_text("same content")
+
+    calls = []
+
+    def cb(current, total, text):
+        calls.append((current, total))
+
+    find_duplicates(str(tmp_path), progress_callback=cb)
+
+    assert calls
+    # 统一坐标：total 恒为 100，current 为 0-100 的绝对百分比且单调不减
+    assert all(total == 100 for _, total in calls)
+    currents = [current for current, _ in calls]
+    assert currents == sorted(currents)
+
+
 def test_calculate_hash_different_files(tmp_path):
     a = tmp_path / "a.bin"
     b = tmp_path / "b.bin"
