@@ -117,6 +117,24 @@ def test_progress_is_monotonic_on_absolute_scale(tmp_path):
     assert currents == sorted(currents)
 
 
+def test_full_hash_progress_is_throttled(tmp_path):
+    # 300 个相同文件：不节流时阶段 3 会逐文件上报 300+ 次
+    n = 300
+    for i in range(n):
+        (tmp_path / f"f_{i:03d}.txt").write_text("same content")
+
+    calls = []
+
+    def cb(current, total, text):
+        calls.append((current, total, text))
+
+    find_duplicates(str(tmp_path), progress_callback=cb)
+
+    assert calls
+    # 节流后总回调数远小于文件数
+    assert len(calls) < n // 4
+
+
 def test_calculate_hash_different_files(tmp_path):
     a = tmp_path / "a.bin"
     b = tmp_path / "b.bin"

@@ -128,7 +128,10 @@ def find_duplicates(scan_path, progress_callback=None, cancel_event=None):
                 duplicates[h].append(path)
 
             current_full_hash_processed += 1
-            if potential_full_hash_count > 0:
+            # 每 20 个文件报一次进度，避免大结果集时 GUI 事件队列被刷爆
+            if (potential_full_hash_count > 0
+                    and (current_full_hash_processed % 20 == 0
+                         or current_full_hash_processed == potential_full_hash_count)):
                 pct = 75 + 25 * (current_full_hash_processed / potential_full_hash_count)
                 _safe_progress(progress_callback, pct, 100, "正在进行全量校验...")
 
