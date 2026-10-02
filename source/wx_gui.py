@@ -263,8 +263,13 @@ class FileTable(ctk.CTkFrame):
             self.rows[idx][0].destroy()
             self.rows.pop(idx)
             self.selected.discard(idx)
-            # re-index selected set and row frame indices
+            # re-index selected set, row frame indices and the shift-click anchor
             self.selected = {i if i < idx else i - 1 for i in self.selected if i != idx}
+            if self._last_idx is not None:
+                if self._last_idx == idx:
+                    self._last_idx = None
+                elif self._last_idx > idx:
+                    self._last_idx -= 1
             for i in range(idx, len(self.rows)):
                 self.rows[i][0].idx = i
 

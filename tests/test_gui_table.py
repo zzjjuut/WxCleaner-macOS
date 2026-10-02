@@ -355,3 +355,42 @@ def test_row_background_repaint_skips_unchanged_state(tk_root):
         if table is not None:
             table.destroy()
         root.update_idletasks()
+
+
+def test_shift_click_after_delete_uses_updated_anchor(tk_root):
+    root = tk_root
+    table = None
+    try:
+        FileTable = _import_file_table()
+        table = FileTable(
+            root,
+            columns=("num", "path", "status"),
+            widths=(60, 0, 80),
+        )
+        table.pack(fill="both", expand=True)
+        for i in range(3):
+            table.insert({"num": i + 1, "path": f"/tmp/{i}.txt", "status": "重复"},
+                         tags=("duplicate",))
+        root.update_idletasks()
+
+        # 点击第 3 行建立 Shift 锚点，然后删除第 1 行
+        table._click(SimpleNamespace(state=0), 2)
+        assert table._last_idx == 2
+
+        table.delete(0)
+        assert table._last_idx == 1  # 锚点随行号前移
+
+        # Shift+点击新第 3 行（原第 4 行位置不存在，现共 2 行 → 点 idx=1 后面那行不存在，
+        # 改点 idx=1：范围应为 1..1）
+        table._click(SimpleNamespace(state=0x0001), 1)
+        assert table.selection() == [1]
+
+        # 删除锚点本身后，后续 Shift+点击应从单选开始
+        table.delete(1)
+        assert table._last_idx is None
+        table._click(SimpleNamespace(state=0x0001), 0)
+        assert table.selection() == [0]
+    finally:
+        if table is not None:
+            table.destroy()
+        root.update_idletasks()
