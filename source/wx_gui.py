@@ -676,18 +676,6 @@ class WxCleanerApp:
             size /= 1024
         return f"{size:.2f} TB"
 
-    @staticmethod
-    def _parse_size(size_str):
-        try:
-            parts = str(size_str).split()
-            if len(parts) == 2:
-                val = float(parts[0])
-                mult = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
-                return val * mult.get(parts[1], 0)
-        except Exception:
-            pass
-        return 0
-
     # ────────────────────────────────────────────────────────
     #  Core functionality (all preserved from original)
     # ────────────────────────────────────────────────────────
@@ -804,7 +792,7 @@ class WxCleanerApp:
 
                 rows.append((
                     {"num": count, "path": p, "size": size_str,
-                     "mtime": mtime_str, "status": status},
+                     "mtime": mtime_str, "status": status, "bytes": size},
                     tags,
                 ))
                 count += 1
@@ -850,14 +838,18 @@ class WxCleanerApp:
     def on_tree_select(self):
         selected_items = self.tree.selection()
         count = len(selected_items)
-        total_size = 0.0
+        if count == 0:
+            self.selection_label.configure(text="")
+            return
 
+        # 累加行数据里的精确字节数，避免把显示字符串反解析带来的舍入误差
+        total_bytes = 0
         for idx in selected_items:
-            size_str = self.tree.item_values(idx, "size")
-            total_size += self._parse_size(size_str)
+            total_bytes += int(self.tree.item_values(idx, "bytes") or 0)
 
-        size_disp = self._format_size(total_size)
-        self.selection_label.configure(text=f"已选中: {count} 个文件 ({size_disp})")
+        self.selection_label.configure(
+            text=f"已选中: {count} 个文件 ({self._format_size(total_bytes)})"
+        )
 
     def show_menu(self, event):
         self.menu.post(event.x_root, event.y_root)
@@ -928,5 +920,9 @@ class WxCleanerApp:
             1 for idx in self.tree.get_children()
             if self.tree.item_values(idx, "status") == "重复"
         )
-        self.summary_label.configure(text=f"已清理，剩余 {remaining} 个重复文件")
+        # 删除结果进状态栏，扫描统计（summary）保持不变
+        self.status_label.configure(
+            text=f"已将 {len(deleted_paths)} 个文件移至回收站，剩余 {remaining} 个重复文件",
+            text_color=C.GREEN,
+        )
         self.on_tree_select()

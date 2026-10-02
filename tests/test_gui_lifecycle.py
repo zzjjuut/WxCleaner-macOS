@@ -152,6 +152,87 @@ def test_large_result_set_is_rendered_in_batches():
         wx_gui.WxCleanerApp.RENDER_BATCH = original_batch
 
 
+def test_empty_selection_clears_selection_label():
+    app = wx_gui.WxCleanerApp.__new__(wx_gui.WxCleanerApp)
+    app.tree = SimpleNamespace(selection=lambda: [])
+    app.selection_label = FakeWidget()
+
+    app.on_tree_select()
+
+    assert app.selection_label.state["text"] == ""
+
+
+def test_selection_size_uses_exact_bytes():
+    app = wx_gui.WxCleanerApp.__new__(wx_gui.WxCleanerApp)
+    rows = {
+        0: {"bytes": 1024, "size": "1.00 KB"},
+        1: {"bytes": 512, "size": "512.00 B"},
+        2: {"bytes": "", "size": "未知"},  # stat 失败的行按 0 计
+    }
+    app.tree = SimpleNamespace(
+        selection=lambda: [0, 1, 2],
+        item_values=lambda idx, col: rows[idx].get(col, ""),
+    )
+    app.selection_label = FakeWidget()
+
+    app.on_tree_select()
+
+    assert app.selection_label.state["text"] == "已选中: 3 个文件 (1.50 KB)"
+
+
+def test_delete_selected_reports_in_status_and_keeps_summary(tmp_path, monkeypatch):
+    a = tmp_path / "a.txt"
+    b = tmp_path / "b.txt"
+    c = tmp_path / "c.txt"
+    for f in (a, b, c):
+        f.write_text("x")
+
+    class FakeTree:
+        def __init__(self):
+            self.rows = [
+                {"path": str(a), "status": "重复", "bytes": 10},
+                {"path": str(b), "status": "重复", "bytes": 20},
+                {"path": str(c), "status": "保留", "bytes": 5},
+            ]
+            self.selected = [0, 1]
+
+        def selection(self):
+            return list(self.selected)
+
+        def item_values(self, idx, col=None):
+            vals = self.rows[idx]
+            return dict(vals) if col is None else vals.get(col, "")
+
+        def get_children(self):
+            return list(range(len(self.rows)))
+
+        def delete(self, idx):
+            self.rows.pop(idx)
+            self.selected = [i if i < idx else i - 1 for i in self.selected if i != idx]
+
+    app = wx_gui.WxCleanerApp.__new__(wx_gui.WxCleanerApp)
+    app.tree = FakeTree()
+    app.summary_label = FakeWidget()
+    app.summary_label.configure(text="共 1 组重复  ·  可释放 30.00 B")
+    app.status_label = FakeWidget()
+    app.selection_label = FakeWidget()
+
+    monkeypatch.setattr(wx_gui, "send2trash", lambda path: None)
+    monkeypatch.setattr(wx_gui.messagebox, "askyesno", lambda *args, **kwargs: True)
+    errors = []
+    monkeypatch.setattr(wx_gui.messagebox, "showerror",
+                        lambda title, message: errors.append(message))
+
+    app.delete_selected()
+
+    assert errors == []
+    # 扫描统计不被删除结果覆盖，删除结果进状态栏
+    assert app.summary_label.state["text"] == "共 1 组重复  ·  可释放 30.00 B"
+    assert app.status_label.state["text"] == "已将 2 个文件移至回收站，剩余 0 个重复文件"
+    # 全部选中项删除后选中区清空
+    assert app.selection_label.state["text"] == ""
+
+
 def test_batch_rendering_stops_after_window_close():
     app = wx_gui.WxCleanerApp.__new__(wx_gui.WxCleanerApp)
     app._closing = False
