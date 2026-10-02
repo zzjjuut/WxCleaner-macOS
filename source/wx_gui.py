@@ -859,12 +859,19 @@ class WxCleanerApp:
         if not selected:
             return
         path = self.tree.item_values(selected[0], "path")
+        file_path = str(path)
+        if not os.path.exists(file_path):
+            messagebox.showwarning("提示", f"文件已不存在（可能已被清理）：\n{file_path}")
+            return
         try:
-            file_path = str(path)
             if sys.platform == "darwin":
                 # macOS: "open -R" reveals and selects the file in Finder
-                subprocess.Popen(["open", "-R", file_path])
+                result = subprocess.run(["open", "-R", file_path], capture_output=True)
+                if result.returncode != 0:
+                    detail = result.stderr.decode(errors="replace").strip()
+                    raise OSError(detail or f"open 退出码 {result.returncode}")
             elif sys.platform == "win32":
+                # explorer 的退出码不表示成败，保持 fire-and-forget
                 subprocess.Popen(["explorer", "/select,", file_path])
             else:
                 subprocess.Popen(["xdg-open", os.path.dirname(file_path)])

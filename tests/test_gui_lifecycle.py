@@ -296,3 +296,69 @@ def test_deferred_scan_error_callback_keeps_exception_text(monkeypatch):
 
     assert errors == [("错误", "扫描出错: permission denied")]
     assert app.status_label.state["text"] == "扫描失败"
+
+
+def _app_for_open_location(path):
+    app = wx_gui.WxCleanerApp.__new__(wx_gui.WxCleanerApp)
+    app.tree = SimpleNamespace(
+        selection=lambda: [0],
+        item_values=lambda idx, col: path if col == "path" else "",
+    )
+    return app
+
+
+def test_open_file_location_warns_when_file_is_gone(monkeypatch):
+    app = _app_for_open_location("/nonexistent/file.txt")
+    warnings = []
+    monkeypatch.setattr(wx_gui.messagebox, "showwarning",
+                        lambda title, message: warnings.append((title, message)))
+    opened = []
+    monkeypatch.setattr(wx_gui.subprocess, "run",
+                        lambda *args, **kwargs: opened.append(args))
+
+    app.open_file_location()
+
+    assert warnings == [("提示", "文件已不存在（可能已被清理）：\n/nonexistent/file.txt")]
+    assert opened == []
+
+
+def test_open_file_location_reports_open_failure(tmp_path, monkeypatch):
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    app = _app_for_open_location(str(f))
+    dialogs = []
+    monkeypatch.setattr(wx_gui.messagebox, "showerror",
+                        lambda title, message: dialogs.append((title, message)))
+    monkeypatch.setattr(wx_gui.messagebox, "showwarning",
+                        lambda title, message: dialogs.append((title, message)))
+    monkeypatch.setattr(
+        wx_gui.subprocess, "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=1, stderr=b"boom"),
+    )
+
+    app.open_file_location()
+
+    assert dialogs == [("错误", "无法打开文件位置: boom")]
+
+
+def test_open_file_location_succeeds_silently(tmp_path, monkeypatch):
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    app = _app_for_open_location(str(f))
+    dialogs = []
+    monkeypatch.setattr(wx_gui.messagebox, "showerror",
+                        lambda title, message: dialogs.append((title, message)))
+    monkeypatch.setattr(wx_gui.messagebox, "showwarning",
+                        lambda title, message: dialogs.append((title, message)))
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return SimpleNamespace(returncode=0, stderr=b"")
+
+    monkeypatch.setattr(wx_gui.subprocess, "run", fake_run)
+
+    app.open_file_location()
+
+    assert calls == [["open", "-R", str(f)]]
+    assert dialogs == []
